@@ -1,60 +1,219 @@
-const goalOptions = {
-  kraft: { label: 'Muskelaufbau', split: ['Push', 'Pull', 'Beine', 'Oberkörper', 'Unterkörper'] },
-  abnehmen: { label: 'Abnehmen', split: ['Ganzkörper Kraft', 'Intervalle', 'Mobility', 'Zone-2 Cardio', 'Core'] },
-  ausdauer: { label: 'Ausdauer', split: ['Easy Run', 'Tempo', 'Kraft Stabi', 'Lange Einheit', 'Regeneration'] },
-};
+const scripts = [
+  {
+    name: 'BRPlayerController.cs',
+    tag: 'Spielerbewegung',
+    description: 'Third-Person-Grundbewegung mit Sprinten, Springen und Ducken über CharacterController.',
+    code: `using UnityEngine;
 
-const workoutBank = {
-  Push: ['Bankdrücken 4×6-8', 'Schulterdrücken 3×8-10', 'Liegestütze 3×AMRAP', 'Trizepsdrücken 3×12'],
-  Pull: ['Klimmzüge/Latzug 4×6-10', 'Rudern 4×8-10', 'Face Pulls 3×15', 'Bizepscurls 3×12'],
-  Beine: ['Kniebeugen 4×6-8', 'Rumänisches Kreuzheben 3×8', 'Ausfallschritte 3×10/Seite', 'Wadenheben 3×15'],
-  Oberkörper: ['Schrägbankdrücken 3×8', 'Kabelrudern 3×10', 'Seitheben 3×15', 'Plank 3×45s'],
-  Unterkörper: ['Beinpresse 4×10', 'Hip Thrust 3×10', 'Beincurls 3×12', 'Farmer Walk 4×30m'],
-  'Ganzkörper Kraft': ['Goblet Squat 4×10', 'Kurzhantel-Rudern 3×12', 'Brustpresse 3×10', 'Dead Bug 3×12'],
-  Intervalle: ['10 Min Warm-up', '8×45s schnell/75s locker', '10 Min Cool-down', 'Dehnen 8 Min'],
-  Mobility: ['Hüftmobilität 10 Min', 'Brustwirbelsäule 8 Min', 'Schulterkontrolle 8 Min', 'Atemübung 5 Min'],
-  'Zone-2 Cardio': ['35-50 Min locker', 'Puls 60-70% HFmax', 'Gesprächstempo halten', '5 Min Cool-down'],
-  Core: ['Pallof Press 3×12', 'Side Plank 3×30s', 'Mountain Climbers 3×30s', 'Bird Dog 3×10'],
-  'Easy Run': ['30-45 Min locker laufen', 'Kadenz entspannt', 'RPE 4/10', 'Nachbereitung: Waden dehnen'],
-  Tempo: ['12 Min Einlaufen', '3×8 Min zügig', '3 Min Trabpause', '10 Min Auslaufen'],
-  'Kraft Stabi': ['Step-ups 3×10', 'Single-leg RDL 3×8', 'Wadenheben 4×12', 'Core Zirkel 10 Min'],
-  'Lange Einheit': ['60-90 Min ruhig', 'Trinken planen', 'Puls stabil halten', 'Letzte 10 Min sehr locker'],
-  Regeneration: ['Spaziergang 30 Min', 'Mobility Flow 15 Min', 'Schlafziel prüfen', 'Stresslevel notieren'],
-};
+[RequireComponent(typeof(CharacterController))]
+public class BRPlayerController : MonoBehaviour
+{
+    [SerializeField] private Transform cameraRoot;
+    [SerializeField] private float walkSpeed = 5f;
+    [SerializeField] private float sprintSpeed = 8f;
+    [SerializeField] private float crouchSpeed = 2.5f;
+    [SerializeField] private float jumpHeight = 1.4f;
+    [SerializeField] private float gravity = -20f;
+    [SerializeField] private float turnSmoothTime = 0.08f;
 
-let state = { goal: 'kraft', days: 4, level: 'intermediate', connected: false, metrics: { steps: 8420, calories: 612, heartRate: 72, sleep: 7.4, lastSync: 'Demo-Daten' } };
+    private CharacterController controller;
+    private Vector3 verticalVelocity;
+    private float turnSmoothVelocity;
+    private bool isCrouching;
 
-const icon = (name) => `<span class="icon" aria-hidden="true">${name}</span>`;
-const app = document.querySelector('#root');
+    private void Awake() => controller = GetComponent<CharacterController>();
 
-function buildPlan() {
-  const split = goalOptions[state.goal].split;
-  const intensity = state.level === 'beginner' ? 'moderat' : state.level === 'advanced' ? 'hoch' : 'mittel';
-  return Array.from({ length: Number(state.days) }, (_, index) => {
-    const title = split[index % split.length];
-    return { day: `Tag ${index + 1}`, title, intensity, exercises: workoutBank[title] };
-  });
-}
+    private void Update()
+    {
+        isCrouching = Input.GetKey(KeyCode.LeftControl);
+        Move();
+        JumpAndGravity();
+    }
+
+    private void Move()
+    {
+        float horizontal = Input.GetAxisRaw("Horizontal");
+        float vertical = Input.GetAxisRaw("Vertical");
+        Vector3 input = new Vector3(horizontal, 0f, vertical).normalized;
+
+        if (input.magnitude < 0.1f) return;
+
+        float targetAngle = Mathf.Atan2(input.x, input.z) * Mathf.Rad2Deg + cameraRoot.eulerAngles.y;
+        float angle = Mathf.SmoothDampAngle(transform.eulerAngles.y, targetAngle, ref turnSmoothVelocity, turnSmoothTime);
+        transform.rotation = Quaternion.Euler(0f, angle, 0f);
+
+        Vector3 moveDirection = Quaternion.Euler(0f, targetAngle, 0f) * Vector3.forward;
+        float speed = isCrouching ? crouchSpeed : Input.GetKey(KeyCode.LeftShift) ? sprintSpeed : walkSpeed;
+        controller.Move(moveDirection.normalized * speed * Time.deltaTime);
+    }
+
+    private void JumpAndGravity()
+    {
+        if (controller.isGrounded && verticalVelocity.y < 0f)
+            verticalVelocity.y = -2f;
+
+        if (controller.isGrounded && Input.GetButtonDown("Jump") && !isCrouching)
+            verticalVelocity.y = Mathf.Sqrt(jumpHeight * -2f * gravity);
+
+        verticalVelocity.y += gravity * Time.deltaTime;
+        controller.Move(verticalVelocity * Time.deltaTime);
+    }
+}`,
+  },
+  {
+    name: 'BuildPiece.cs',
+    tag: 'Struktur',
+    description: 'Zerstörbare Bauteile mit Health-Points für Wand, Rampe, Boden und Dach.',
+    code: `using UnityEngine;
+
+public enum BuildPieceType { Wall, Ramp, Floor, Roof }
+
+public class BuildPiece : MonoBehaviour
+{
+    [SerializeField] private BuildPieceType pieceType = BuildPieceType.Wall;
+    [SerializeField] private int maxHealth = 150;
+
+    public BuildPieceType PieceType => pieceType;
+    public int CurrentHealth { get; private set; }
+
+    private void Awake() => CurrentHealth = maxHealth;
+
+    public void ApplyDamage(int amount)
+    {
+        CurrentHealth = Mathf.Max(0, CurrentHealth - amount);
+        if (CurrentHealth == 0)
+            Destroy(gameObject);
+    }
+}`,
+  },
+  {
+    name: 'BuildingSystem.cs',
+    tag: 'Bausystem',
+    description: 'Wandvorschau mit Grid-Snapping, Kollisionsprüfung und Platzierung per linker Maustaste.',
+    code: `using UnityEngine;
+
+public class BuildingSystem : MonoBehaviour
+{
+    [SerializeField] private Camera playerCamera;
+    [SerializeField] private GameObject wallPrefab;
+    [SerializeField] private GameObject wallPreviewPrefab;
+    [SerializeField] private LayerMask buildBlockers;
+    [SerializeField] private float buildRange = 7f;
+    [SerializeField] private float gridSize = 2f;
+
+    private GameObject preview;
+    private bool buildMode;
+
+    private void Start()
+    {
+        preview = Instantiate(wallPreviewPrefab);
+        preview.SetActive(false);
+    }
+
+    private void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.B))
+            buildMode = !buildMode;
+
+        preview.SetActive(buildMode);
+        if (!buildMode) return;
+
+        Vector3 targetPosition = GetSnappedBuildPosition();
+        Quaternion targetRotation = Quaternion.Euler(0f, Mathf.Round(transform.eulerAngles.y / 90f) * 90f, 0f);
+        preview.transform.SetPositionAndRotation(targetPosition, targetRotation);
+
+        bool canPlace = !Physics.CheckBox(targetPosition, new Vector3(0.9f, 1.5f, 0.15f), targetRotation, buildBlockers);
+        SetPreviewColor(canPlace ? Color.green : Color.red);
+
+        if (canPlace && Input.GetMouseButtonDown(0))
+            Instantiate(wallPrefab, targetPosition, targetRotation);
+    }
+
+    private Vector3 GetSnappedBuildPosition()
+    {
+        Vector3 rawPosition = playerCamera.transform.position + playerCamera.transform.forward * buildRange;
+        return new Vector3(
+            Mathf.Round(rawPosition.x / gridSize) * gridSize,
+            Mathf.Round(rawPosition.y / gridSize) * gridSize,
+            Mathf.Round(rawPosition.z / gridSize) * gridSize);
+    }
+
+    private void SetPreviewColor(Color color)
+    {
+        foreach (Renderer renderer in preview.GetComponentsInChildren<Renderer>())
+            renderer.material.color = new Color(color.r, color.g, color.b, 0.45f);
+    }
+}`,
+  },
+];
+
+const milestones = [
+  'Unity 2022 LTS oder neuer mit URP-Template erstellen.',
+  'Third-Person-Kapsel mit CharacterController, Main Camera und CameraRig anlegen.',
+  'WallPrefab und WallPreviewPrefab als eigene graue Blockout-Assets erstellen.',
+  'BRPlayerController und BuildingSystem auf den Spieler legen und Referenzen verbinden.',
+  'Play drücken: WASD bewegen, Shift sprinten, Space springen, Strg ducken, B toggelt Bau-Modus, Linksklick platziert eine Wand.',
+];
+
+const nextSteps = [
+  'Inventar-Slots und Ressourcenwerte für Holz/Stein/Metall ergänzen.',
+  'Loot-Daten als ScriptableObjects modellieren und Spawnpunkte in der Arena verteilen.',
+  'Health/Shield-Komponenten mit Treffererkennung verbinden.',
+  'Schrumpfende Sicherheitszone mit UI-Timer als nächsten Meilenstein implementieren.',
+];
 
 function render() {
-  const metrics = state.metrics;
-  app.innerHTML = `<main>
-    <section class="hero"><nav><div class="brand">${icon('◒')} FitSync Planner</div><a href="#connect">Gerät verbinden</a></nav><div class="heroGrid"><div><p class="eyebrow">${icon('✦')} Trainingsplanung + Wearable-Daten</p><h1>Erstelle smarte Fitnesspläne und lies deine Samsung-Gear-Daten aus.</h1><p class="lead">Plane Kraft, Ausdauer und Abnehmen in wenigen Klicks. Verbinde deine Samsung Gear S3 Frontier über Samsung Health, Health Connect oder CSV-Export, um Schritte, Puls, Schlaf und Kalorien in die Planung einfließen zu lassen.</p><a class="cta" href="#planner">Plan erstellen</a></div><div class="watchCard">${icon('⌚')}<h2>Samsung Gear S3 Frontier</h2><p>Status: ${state.connected ? 'Synchronisiert' : 'Bereit zum Verbinden'}</p><button id="demoSync">${icon('⌁')} Demo-Sync starten</button></div></div></section>
-    <section class="metrics" aria-label="Fitnessdaten">${metric('◷','Schritte', metrics.steps.toLocaleString('de-DE'))}${metric('◆','Aktive kcal', metrics.calories)}${metric('♡','Ruhepuls', `${metrics.heartRate} bpm`)}${metric('☾','Schlaf', `${metrics.sleep} h`)}</section>
-    <section id="planner" class="panel twoCols"><div><p class="eyebrow">Plan Generator</p><h2>Dein Trainingsplan</h2><div class="controls"><label>Ziel<select id="goal">${Object.entries(goalOptions).map(([key, item]) => `<option value="${key}" ${state.goal === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></label><label>Trainingstage/Woche<input id="days" type="range" min="2" max="6" value="${state.days}"><strong>${state.days} Tage</strong></label><label>Level<select id="level"><option value="beginner" ${state.level === 'beginner' ? 'selected' : ''}>Einsteiger</option><option value="intermediate" ${state.level === 'intermediate' ? 'selected' : ''}>Fortgeschritten</option><option value="advanced" ${state.level === 'advanced' ? 'selected' : ''}>Erfahren</option></select></label></div></div><div class="planList">${buildPlan().map(planCard).join('')}</div></section>
-    <section id="connect" class="panel connect"><div><p class="eyebrow">${icon('✓')} Datenschutzfreundlich</p><h2>Wearable-Anbindung</h2><p>Browser können eine Gear S3 nicht direkt vollständig auslesen. Diese Website bereitet deshalb die üblichen Integrationswege vor: Samsung Health/Health Connect für Android-Apps, CSV-Import für Exporte und eine Demo-Sync-Schnittstelle für spätere Backend-APIs.</p><div class="importBox">${icon('⇪')}<label>Samsung-Health CSV importieren<input id="csv" type="file" accept=".csv"></label></div><small>Letzte Synchronisierung: ${metrics.lastSync}</small></div><ol><li>Samsung Health auf dem Smartphone mit der Gear S3 synchronisieren.</li><li>Daten per Health Connect freigeben oder als CSV exportieren.</li><li>Hier importieren und Trainingsumfang anhand von Schlaf, Puls und Aktivität anpassen.</li></ol></section>
+  document.querySelector('#root').innerHTML = `<main>
+    <section class="hero">
+      <nav><div class="brand"><span>◇</span> Stormforge Arena</div><a href="#milestone">Meilenstein 1</a></nav>
+      <div class="heroGrid">
+        <div>
+          <p class="eyebrow">Eigenständiger Unity-Prototyp · URP · Third-Person</p>
+          <h1>Grundgerüst für ein originales Battle-Royale-Projekt.</h1>
+          <p class="lead">Dieses Starterpaket nutzt keine fremden Marken, Figuren, Logos oder Skins. Es fokussiert den ersten spielbaren Meilenstein: Spielerbewegung plus ein einfaches Bausystem zum Platzieren einer Wand.</p>
+          <a class="cta" href="#scripts">C#-Scripts ansehen</a>
+        </div>
+        <div class="prototypeCard">
+          <span class="badge">Milestone 01</span>
+          <h2>Player + Wall Build</h2>
+          <p>Bewegen, sprinten, springen, ducken, Baumodus toggeln und eine gesnappte Wand platzieren.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="milestone" class="panel twoCols">
+      <div>
+        <p class="eyebrow">Setup-Schritte</p>
+        <h2>So setzt du den ersten Prototyp in Unity auf</h2>
+        <p>Nutze simple Platzhalter-Geometrie und eigene Namen, damit das Projekt von Anfang an klar als eigenständige Marke aufgebaut ist.</p>
+      </div>
+      <ol class="steps">${milestones.map((step) => `<li>${step}</li>`).join('')}</ol>
+    </section>
+
+    <section id="scripts" class="scripts">
+      ${scripts.map(scriptCard).join('')}
+    </section>
+
+    <section class="panel roadmap">
+      <div>
+        <p class="eyebrow">Danach</p>
+        <h2>Nächste modulare Systeme</h2>
+      </div>
+      <div class="nextGrid">${nextSteps.map((step) => `<article>${step}</article>`).join('')}</div>
+    </section>
   </main>`;
-  bindEvents();
 }
 
-function metric(symbol, label, value) { return `<div class="metric">${icon(symbol)}<span>${label}</span><strong>${value}</strong></div>`; }
-function planCard(item) { return `<article><div><strong>${item.day}</strong><h3>${item.title}</h3><p>Intensität: ${item.intensity}</p></div><ul>${item.exercises.map((ex) => `<li>${icon('✓')}${ex}</li>`).join('')}</ul></article>`; }
-function bindEvents() {
-  document.querySelector('#demoSync').addEventListener('click', () => { state = { ...state, connected: true, metrics: { steps: 11890, calories: 934, heartRate: 68, sleep: 8.1, lastSync: new Date().toLocaleString('de-DE') } }; render(); });
-  document.querySelector('#goal').addEventListener('change', (event) => { state.goal = event.target.value; render(); });
-  document.querySelector('#days').addEventListener('input', (event) => { state.days = event.target.value; render(); });
-  document.querySelector('#level').addEventListener('change', (event) => { state.level = event.target.value; render(); });
-  document.querySelector('#csv').addEventListener('change', (event) => { const file = event.target.files?.[0]; if (!file) return; state.connected = true; state.metrics.lastSync = `CSV importiert: ${file.name}`; render(); });
+function scriptCard(script) {
+  return `<article class="scriptCard">
+    <div class="scriptHeader"><span>${script.tag}</span><strong>${script.name}</strong></div>
+    <p>${script.description}</p>
+    <pre><code>${escapeHtml(script.code)}</code></pre>
+  </article>`;
+}
+
+function escapeHtml(value) {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 render();
